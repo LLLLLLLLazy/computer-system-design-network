@@ -69,8 +69,8 @@ fn handle_frame(data: &[u8], local_mac: &[u8; 6]) -> Result<()> {
         .append(true)
         .open(OUTPUT_FILE)
         .with_context(|| format!("写入 {OUTPUT_FILE} 失败"))?
-        .write_all(payload)
+        .write_all(data)
         .with_context(|| format!("追加 {OUTPUT_FILE} 失败"))?;
-    println!("已将载荷 {} 字节追加写入 {OUTPUT_FILE}", payload.len());
+    println!("已将完整帧 {} 字节追加写入 {OUTPUT_FILE}", data.len());
     Ok(())
 }
