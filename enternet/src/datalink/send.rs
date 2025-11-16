@@ -3,11 +3,11 @@ use std::fs;
 
 use super::open_device;
 use crate::frame::{
-    crc32, CRC_LEN, DEST_MAC, ETHER_TYPE_IPV4, HEADER_LEN, INPUT_FILE, MAX_PAYLOAD_LEN,
-    MIN_FRAME_SIZE, MIN_PAYLOAD_LEN, SRC_MAC,
+    crc32, CRC_LEN, ETHER_TYPE_IPV4, HEADER_LEN, INPUT_FILE, MAX_PAYLOAD_LEN,
+    MIN_FRAME_SIZE, MIN_PAYLOAD_LEN,
 };
 
-pub fn datalink_send(iface: &str) -> Result<()> {
+pub fn datalink_send(iface: &str, src_mac: [u8; 6], dest_mac: [u8; 6]) -> Result<()> {
     let mut payload = fs::read(INPUT_FILE)
         .with_context(|| format!("无法打开输入文件 {INPUT_FILE}"))?;
     if payload.is_empty() {
@@ -22,8 +22,8 @@ pub fn datalink_send(iface: &str) -> Result<()> {
     }
 
     let mut frame = Vec::with_capacity(HEADER_LEN + payload.len() + CRC_LEN);
-    frame.extend_from_slice(&DEST_MAC);
-    frame.extend_from_slice(&SRC_MAC);
+    frame.extend_from_slice(&dest_mac);
+    frame.extend_from_slice(&src_mac);
     frame.extend_from_slice(&ETHER_TYPE_IPV4.to_be_bytes());
     frame.extend_from_slice(&payload);
     let crc = crc32(&frame);

@@ -7,11 +7,11 @@ use std::{
 
 use super::open_device;
 use crate::frame::{
-    crc32, fmt_mac, BROADCAST_MAC, CRC_LEN, DEST_MAC, HEADER_LEN, MAX_FRAME_SIZE, MIN_FRAME_SIZE,
+    crc32, fmt_mac, BROADCAST_MAC, CRC_LEN, HEADER_LEN, MAX_FRAME_SIZE, MIN_FRAME_SIZE,
     OUTPUT_FILE,
 };
 
-pub fn datalink_recv(iface: &str) -> Result<()> {
+pub fn datalink_recv(iface: &str, local_mac: [u8; 6]) -> Result<()> {
     let mut cap = open_device(iface)?;
     if cap.get_datalink() != Linktype::ETHERNET {
         return Err(anyhow!("仅支持 Ethernet 网卡"));
@@ -23,7 +23,7 @@ pub fn datalink_recv(iface: &str) -> Result<()> {
     loop {
         match cap.next_packet() {
             Ok(packet) => {
-                if let Err(err) = handle_frame(packet.data) {
+                if let Err(err) = handle_frame(packet.data, &local_mac) {
                     eprintln!("{err}");
                 }
             }
@@ -33,7 +33,7 @@ pub fn datalink_recv(iface: &str) -> Result<()> {
     }
 }
 
-fn handle_frame(data: &[u8]) -> Result<()> {
+fn handle_frame(data: &[u8], local_mac: &[u8; 6]) -> Result<()> {
     if data.len() < HEADER_LEN + CRC_LEN {
         return Ok(());
     }
@@ -42,7 +42,7 @@ fn handle_frame(data: &[u8]) -> Result<()> {
         return Ok(());
     }
     let dest = &data[..6];
-    if dest != &DEST_MAC && dest != &BROADCAST_MAC {
+    if dest != local_mac && dest != &BROADCAST_MAC {
         return Ok(());
     }
     let src = &data[6..12];
