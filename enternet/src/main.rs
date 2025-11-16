@@ -4,6 +4,8 @@ mod cli;
 mod datalink;
 mod frame;
 mod net;
+mod recv_queue;
+mod send_queue;
 
 use cli::{parse_cli, Mode};
 use datalink::{datalink_recv, datalink_send};
