@@ -42,11 +42,11 @@ network/
 进入 `net` 子项目目录：
 
 ```bash
-cargo build              # 编译
-sudo cargo run -- send <iface> <dest-mac>   # 发送模式
-sudo cargo run -- recv <iface>             # 接收模式
+make build          # 编译
+make run-send       # 发送模式
+make run-recv       # 接收模式
 ```
 
 - `<iface>`：本机网卡名称（如 `en0`、`eth0`）。
 - `<dest-mac>`：目标主机 MAC 地址（`XX:XX:XX:XX:XX:XX`）。
-- 仅可在拥有 libpcap 权限的环境运行；macOS 需 `sudo`。
+- 仅可在拥有 libpcap 权限的环境运行。

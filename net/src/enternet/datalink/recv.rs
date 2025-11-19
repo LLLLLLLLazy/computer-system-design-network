@@ -65,7 +65,7 @@ fn handle_frame(data: &[u8], local_mac: &[u8; 6]) -> Result<Option<Vec<u8>>> {
         return Ok(None);
     }
     if data.len() < MIN_FRAME_SIZE || data.len() > MAX_FRAME_SIZE {
-        println!("丢弃帧: 长度异常 caplen={}", data.len());
+        // println!("丢弃帧: 长度异常 caplen={}", data.len());
         return Ok(None);
     }
     let dest = &data[..6];
@@ -79,9 +79,9 @@ fn handle_frame(data: &[u8], local_mac: &[u8; 6]) -> Result<Option<Vec<u8>>> {
         u32::from_be_bytes(data[payload_end..].try_into().expect("slice len checked"));
     let crc_calc = crc32(&data[..payload_end]);
     if crc_calc != crc_expect {
-        println!(
-            "丢弃帧: CRC 不匹配 计算={crc_calc:08X} 期望={crc_expect:08X}"
-        );
+        // println!(
+        //     "丢弃帧: CRC 不匹配 计算={crc_calc:08X} 期望={crc_expect:08X}"
+        // );
         return Ok(None);
     }
     println!(
