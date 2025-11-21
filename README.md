@@ -46,7 +46,13 @@ make build          # 编译
 make run-send       # 发送模式
 make run-recv       # 接收模式
 ```
-
+如果想要直接运行可执行程序：
+```bash
+#net\target\debug
+#进入debug目录下运行
+./net recv          # 接收模式
+./net send          # 发送模式
+```
 - `<iface>`：本机网卡名称（如 `en0`、`eth0`）。
 - `<dest-mac>`：目标主机 MAC 地址（`XX:XX:XX:XX:XX:XX`）。
 - 仅可在拥有 libpcap 权限的环境运行。
