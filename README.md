@@ -41,11 +41,26 @@ network/
 
 进入 `net` 子项目目录：
 
-```bash
-make build          # 编译
-make run-send       # 发送模式
-make run-recv       # 接收模式
-```
+- 编译（可选）：
+
+  ```bash
+  make clean
+  make build
+  ```
+
+- 发送（若不提供 iface 或 目标mac，程序会交互提示选择/输入）：
+
+  ```bash
+  make run-send <iface> <dest-mac>
+  ```
+
+- 接收（若不提供 iface，程序会交互提示选择/输入）：
+
+  ```bash
+  make run-recv <iface>
+  ```
+
+
 如果想要直接运行可执行程序：
 ```bash
 #net\target\debug
