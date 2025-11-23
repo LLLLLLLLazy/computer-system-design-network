@@ -97,6 +97,12 @@ network/
      ```bash
      make run-send
      ```
+   - 如果已有编译后的可执行文件，想要直接调用可以使用下面的命令进行交互
+      ```bash
+     cd net/target/debug
+     sudo ./net recv  #接收
+     sudo ./net send  #发送
+     ```
    - 传输完成后校验：
      ```bash
      python3 net/data/tools/gen_and_verify.py test
