@@ -1,4 +1,3 @@
-pub mod cli;
 pub mod datalink;
 pub mod frame;
 pub mod net;

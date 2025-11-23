@@ -113,7 +113,7 @@ fn process_frame(
     }
     for expired in reassembler.remove_expired() {
         println!(
-            "分片重组超时: ID={} 源={} 目的={} 协议={}",
+            "分片重组超时: 标识={} 源={} 目的={} 协议={}",
             expired.identification,
             fmt_ipv4(&expired.src),
             fmt_ipv4(&expired.dst),
@@ -145,7 +145,7 @@ fn process_frame(
         ""
     };
     println!(
-        "IPv4 首部{fragment_label}: 版本={} IHL={}({}B) ToS=0x{:02X} ID={} DF={} MF={} 片偏移={}B TTL={} 协议={} 源={} 目的={} 总长={} 选项={}B 载荷={}B",
+        "IPv4 首部{fragment_label}: 版本={} IHL={}({}B) ToS=0x{:02X} 标识={} DF={} MF={} 片偏移={}B TTL={} 协议={} 源={} 目的={} 总长={} 选项={}B 载荷={}B",
         header.version,
         header.ihl,
         header.header_len_bytes(),

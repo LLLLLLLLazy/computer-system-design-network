@@ -1,9 +1,10 @@
 use anyhow::Result;
 
+mod cli;
 mod enternet;
 mod ip;
 
-use enternet::cli::{Mode, parse_cli};
+use cli::cli::{Mode, parse_cli};
 use enternet::datalink::{datalink_recv, datalink_send};
 use enternet::net::{iface_ipv4, iface_mac};
 

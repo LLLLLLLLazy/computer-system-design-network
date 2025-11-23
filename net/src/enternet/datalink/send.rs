@@ -71,9 +71,11 @@ fn enqueue_fragment(
     let Ipv4Packet { header, bytes } = fragment;
     let frame = build_frame_from_payload(&bytes, src_mac, dest_mac);
     println!(
-        "构造 IPv4 分片: ID={} 偏移={}B DF={} MF={} 总长={} 载荷={}B",
+        "构造 IPv4 分片: 标识=0x{:04X}({}) 片偏移={}B ({}×8B) DF={} MF={} 总长={} 载荷={}B",
+        header.identification,
         header.identification,
         header.fragment_offset_bytes(),
+        header.fragment_offset,
         header.df as u8,
         header.mf as u8,
         header.total_length,

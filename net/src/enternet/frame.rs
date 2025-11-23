@@ -1,9 +1,9 @@
-pub const DEST_MAC: [u8; 6] = [0x33; 6];
-pub const SRC_MAC: [u8; 6] = [0x22; 6];
+//pub const DEST_MAC: [u8; 6] = [0x33; 6];
+//pub const SRC_MAC: [u8; 6] = [0x22; 6];
 pub const BROADCAST_MAC: [u8; 6] = [0xFF; 6];
 pub const ETHER_TYPE_IPV4: u16 = 0x0800;
-pub const MIN_PAYLOAD_LEN: usize = 46;
-pub const MAX_PAYLOAD_LEN: usize = 1500;
+//pub const MIN_PAYLOAD_LEN: usize = 46;
+//pub const MAX_PAYLOAD_LEN: usize = 1500;
 pub const MIN_FRAME_SIZE: usize = 64;
 pub const MAX_FRAME_SIZE: usize = 1518;
 pub const HEADER_LEN: usize = 14;
