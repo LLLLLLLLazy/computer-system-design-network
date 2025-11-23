@@ -1,4 +1,3 @@
-//// filepath: /Users/lazy/code/network/net/src/ip/common.rs
 use std::time::Duration;
 
 pub const IPV4_VERSION: u8 = 4;

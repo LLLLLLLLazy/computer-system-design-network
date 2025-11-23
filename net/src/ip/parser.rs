@@ -1,4 +1,3 @@
-//// filepath: /Users/lazy/code/network/net/src/ip/parser.rs
 use anyhow::{Result, anyhow};
 use std::convert::TryInto;
 

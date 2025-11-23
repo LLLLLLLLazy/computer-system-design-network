@@ -1,4 +1,3 @@
-//// filepath: /Users/lazy/code/network/net/src/ip/checksum.rs
 pub fn ipv4_checksum(header: &[u8]) -> u16 {
     let mut sum: u32 = 0;
     let mut chunks = header.chunks_exact(2);
