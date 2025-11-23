@@ -12,7 +12,6 @@
 ```
 src/
   enternet/
-    cli.rs          // 命令行解析
     datalink/       // 链路层收发实现
     frame.rs        // 帧常量与工具
     net.rs          // MAC 查询与解析
