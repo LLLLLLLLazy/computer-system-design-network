@@ -10,12 +10,20 @@ pub const HEADER_LEN: usize = 14;
 pub const CRC_LEN: usize = 4;
 pub const INPUT_FILE: &str = "data/input_file.txt";
 pub const OUTPUT_FILE: &str = "data/output_file.txt";
+pub const IPV4_BROADCAST: [u8; 4] = [255, 255, 255, 255];
 
 pub fn fmt_mac(mac: &[u8]) -> String {
     mac.iter()
         .map(|b| format!("{b:02X}"))
         .collect::<Vec<_>>()
         .join(":")
+}
+
+pub fn fmt_ipv4(addr: &[u8; 4]) -> String {
+    addr.iter()
+        .map(|oct| oct.to_string())
+        .collect::<Vec<_>>()
+        .join(".")
 }
 
 pub fn crc32(data: &[u8]) -> u32 {

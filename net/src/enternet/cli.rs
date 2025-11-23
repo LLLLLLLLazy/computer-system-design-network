@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use pcap::Device;
 use std::{
     env,
@@ -8,7 +8,11 @@ use std::{
 use crate::enternet::net::parse_mac;
 
 pub enum Mode {
-    Send { dest_mac: [u8; 6] },
+    Send {
+        dest_mac: [u8; 6],
+        dest_ip: [u8; 4],
+        protocol: u8,
+    },
     Recv,
 }
 
@@ -20,36 +24,104 @@ pub struct CliArgs {
 pub fn parse_cli() -> Result<CliArgs> {
     let mut args = env::args();
     let program = args.next().unwrap_or_else(|| "enternet".into());
-    let raw_mode = args
-        .next()
-        .ok_or_else(|| anyhow!("用法: {program} <send|recv> [iface] [dest-mac]"))?;
-    let iface = if let Some(i) = args.next() {
-        i
+    let raw_mode = args.next().ok_or_else(|| {
+        anyhow!("用法: {program} <send|recv> [iface] [dest-mac] [dest-ip] [protocol]")
+    })?;
+    let mut rest: Vec<String> = args.collect();
+    let iface = if let Some(candidate) = rest.first() {
+        if looks_like_mac(candidate) || looks_like_ipv4(candidate) {
+            choose_interface()?
+        } else {
+            rest.remove(0)
+        }
     } else {
         choose_interface()?
     };
-    let mode = match raw_mode.to_lowercase().as_str() {
+    match raw_mode.to_lowercase().as_str() {
         "send" => {
-            let dest_arg = args.next().map(|m| parse_mac(&m));
-            let dest_mac = match dest_arg {
-                Some(Ok(mac)) => mac,
-                Some(Err(e)) => return Err(e),
-                None => prompt_dest_mac()?,
+            if rest.len() > 3 {
+                return Err(anyhow!(
+                    "参数过多，最多提供网卡、目标 MAC、目标 IP 与协议号"
+                ));
+            }
+            let dest_mac = match rest.get(0) {
+                Some(value) => parse_mac(value),
+                None => {
+                    let input = prompt("请输入目标 MAC (格式 XX:XX:XX:XX:XX:XX): ")?;
+                    parse_mac(&input)
+                }
+            }?;
+            let dest_ip = match rest.get(1) {
+                Some(value) => parse_ipv4(value)?,
+                None => {
+                    let input = prompt("请输入目标 IP (格式 a.b.c.d): ")?;
+                    parse_ipv4(&input)?
+                }
             };
-            Mode::Send { dest_mac }
+            let protocol = match rest.get(2) {
+                Some(value) => parse_protocol(value)?,
+                None => {
+                    let input =
+                        prompt("请输入上层协议号 (ICMP=1, IGMP=2, TCP=6, UDP=17，默认0): ")?;
+                    if input.trim().is_empty() {
+                        0
+                    } else {
+                        parse_protocol(&input)?
+                    }
+                }
+            };
+            Ok(CliArgs {
+                mode: Mode::Send {
+                    dest_mac,
+                    dest_ip,
+                    protocol,
+                },
+                iface,
+            })
         }
-        "recv" => Mode::Recv,
-        _ => return Err(anyhow!("用法: {program} <send|recv> [iface] [dest-mac]")),
-    };
-    Ok(CliArgs { mode, iface })
+        "recv" => Ok(CliArgs {
+            mode: Mode::Recv,
+            iface,
+        }),
+        _ => Err(anyhow!(
+            "用法: {program} <send|recv> [iface] [dest-mac] [dest-ip] [protocol]"
+        )),
+    }
 }
 
-fn prompt_dest_mac() -> Result<[u8; 6]> {
-    print!("请输入目标 MAC (xx:xx:xx:xx:xx:xx): ");
+fn looks_like_mac(input: &str) -> bool {
+    input.contains(':')
+}
+
+fn looks_like_ipv4(input: &str) -> bool {
+    input.split('.').count() == 4
+}
+
+fn parse_ipv4(input: &str) -> Result<[u8; 4]> {
+    let parts: Vec<&str> = input.split('.').collect();
+    if parts.len() != 4 {
+        return Err(anyhow!("IPv4 地址格式应为 a.b.c.d"));
+    }
+    let mut addr = [0u8; 4];
+    for (idx, part) in parts.iter().enumerate() {
+        let value: u8 = part
+            .parse()
+            .map_err(|_| anyhow!("IPv4 地址片段 {part} 非法"))?;
+        addr[idx] = value;
+    }
+    Ok(addr)
+}
+
+fn parse_protocol(input: &str) -> Result<u8> {
+    input.parse::<u8>().context("协议号需为 0-255 的整数")
+}
+
+fn prompt(message: &str) -> Result<String> {
+    print!("{message}");
     io::stdout().flush().ok();
-    let mut buf = String::new();
-    io::stdin().read_line(&mut buf)?;
-    parse_mac(buf.trim())
+    let mut line = String::new();
+    io::stdin().read_line(&mut line)?;
+    Ok(line.trim().to_string())
 }
 
 fn choose_interface() -> Result<String> {

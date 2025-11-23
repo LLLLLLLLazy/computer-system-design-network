@@ -1,6 +1,7 @@
 //// filepath: /Users/lazy/code/network/enternet/src/net.rs
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use nix::{ifaddrs::getifaddrs, sys::socket::SockaddrLike};
+use std::net::Ipv4Addr;
 
 pub fn iface_mac(iface: &str) -> Result<[u8; 6]> {
     for ifaddr in getifaddrs()? {
@@ -18,6 +19,20 @@ pub fn iface_mac(iface: &str) -> Result<[u8; 6]> {
         }
     }
     Err(anyhow!("未找到接口 {iface} 的硬件地址"))
+}
+
+pub fn iface_ipv4(iface: &str) -> Result<[u8; 4]> {
+    for ifaddr in getifaddrs()? {
+        if ifaddr.interface_name == iface {
+            if let Some(addr) = ifaddr.address {
+                if let Some(inet) = addr.as_sockaddr_in() {
+                    let ipv4: Ipv4Addr = inet.ip();
+                    return Ok(ipv4.octets());
+                }
+            }
+        }
+    }
+    Err(anyhow!("未找到接口 {iface} 的 IPv4 地址"))
 }
 
 pub fn parse_mac(input: &str) -> Result<[u8; 6]> {
