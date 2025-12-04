@@ -253,15 +253,16 @@ fn build_arp_payload(
 }
 
 fn parse_arp_frame(data: &[u8]) -> Option<ArpPacket> {
-    if data.len() < HEADER_LEN + ARP_PACKET_LEN + CRC_LEN {
+    if data.len() < HEADER_LEN + ARP_PACKET_LEN {
         return None;
     }
     let ether_type = u16::from_be_bytes([data[12], data[13]]);
     if ether_type != ETHER_TYPE_ARP {
         return None;
     }
-    let payload = &data[HEADER_LEN..data.len() - CRC_LEN];
-    parse_arp_payload(&payload[..ARP_PACKET_LEN])
+    // pcap 抓到的帧通常不包含 CRC/FCS；因此只取以太头后的前 28 字节作为 ARP 负载。
+    let payload = &data[HEADER_LEN..HEADER_LEN + ARP_PACKET_LEN];
+    parse_arp_payload(payload)
 }
 
 fn parse_arp_payload(payload: &[u8]) -> Option<ArpPacket> {

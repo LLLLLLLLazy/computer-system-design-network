@@ -1,8 +1,7 @@
 use anyhow::{Context, Result, anyhow};
-use pcap::{Active, Capture, Error as PcapError, Linktype};
+use pcap::{Active, Capture, Error as PcapError};
 use std::{fs::OpenOptions, io::Write, sync::Arc, thread};
 
-use super::open_device;
 use crate::{
     enternet::{
         arp,
@@ -24,13 +23,20 @@ enum FrameDispatch {
 }
 
 pub fn datalink_recv(iface: &str, local_mac: [u8; 6], local_ip: [u8; 4]) -> Result<()> {
-    let mut cap = open_device(iface)?;
-    if cap.get_datalink() != Linktype::ETHERNET {
-        return Err(anyhow!("仅支持 Ethernet 网卡"));
-    }
-    if let Err(err) = cap.filter("arp or ether proto 0x0800", true) {
-        eprintln!("安装 BPF 过滤器失败，将继续捕获所有帧: {err}");
-    }
+    // 直接使用 iface 字符串打开 pcap，避免类型转换问题
+    // 确保使用更宽的 snaplen 与包含 arp 的过滤器
+    let snaplen: i32 = 524288;
+    let promiscuous = true;
+    let timeout_ms = 1000;
+    let mut cap = pcap::Capture::from_device(iface)?
+        .snaplen(snaplen)
+        .promisc(promiscuous)
+        .timeout(timeout_ms)
+        .open()?;
+
+    // 允许捕获 ARP + IPv4
+    let bpf_filter = "arp or ether proto 0x0800";
+    cap.filter(bpf_filter, true)?;
 
     let queue = Arc::new(RecvQueue::new(RECV_QUEUE_CAPACITY));
     let worker_queue = Arc::clone(&queue);
@@ -54,26 +60,28 @@ fn recv_loop(
 ) -> Result<()> {
     loop {
         match cap.next_packet() {
-            Ok(packet) => match handle_frame(packet.data, &local_mac, &local_ip)? {
-                FrameDispatch::DeliverIpv4(frame) => {
-                    if let Err(err) = queue.push(frame) {
-                        match err {
-                            QueueError::Full => eprintln!("接收队列已满，丢弃一帧"),
-                            QueueError::Closed => return Ok(()),
+            Ok(packet) => {
+                match handle_frame(packet.data, &local_mac, &local_ip)? {
+                    FrameDispatch::DeliverIpv4(frame) => {
+                        if let Err(err) = queue.push(frame) {
+                            match err {
+                                QueueError::Full => eprintln!("接收队列已满，丢弃一帧"),
+                                QueueError::Closed => return Ok(()),
+                            }
                         }
                     }
+                    FrameDispatch::Reply(reply) => {
+                        cap.sendpacket(reply.as_slice())
+                            .with_context(|| format!("发送 ARP 应答失败 (iface={iface})"))?;
+                        println!(
+                            "ARP 应答已发送: 目标MAC={} 帧长={}",
+                            fmt_mac(&reply[..6]),
+                            reply.len()
+                        );
+                    }
+                    FrameDispatch::Ignore => {}
                 }
-                FrameDispatch::Reply(reply) => {
-                    cap.sendpacket(reply.as_slice())
-                        .with_context(|| format!("发送 ARP 应答失败 (iface={iface})"))?;
-                    println!(
-                        "ARP 应答已发送: 目标MAC={} 帧长={}",
-                        fmt_mac(&reply[..6]),
-                        reply.len()
-                    );
-                }
-                FrameDispatch::Ignore => {}
-            },
+            }
             Err(PcapError::TimeoutExpired) => continue,
             Err(err) => return Err(err.into()),
         }
