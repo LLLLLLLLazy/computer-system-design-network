@@ -5,9 +5,10 @@ use std::{fs::OpenOptions, io::Write, sync::Arc, thread};
 use super::open_device;
 use crate::{
     enternet::{
+        arp,
         frame::{
-            BROADCAST_MAC, CRC_LEN, ETHER_TYPE_IPV4, HEADER_LEN, IPV4_BROADCAST, MAX_FRAME_SIZE,
-            MIN_FRAME_SIZE, OUTPUT_FILE, crc32, fmt_ipv4, fmt_mac,
+            BROADCAST_MAC, CRC_LEN, ETHER_TYPE_ARP, ETHER_TYPE_IPV4, HEADER_LEN, IPV4_BROADCAST,
+            MAX_FRAME_SIZE, MIN_FRAME_SIZE, OUTPUT_FILE, crc32, fmt_ipv4, fmt_mac,
         },
         recv_queue::{QueueError, RecvQueue},
     },
@@ -16,21 +17,27 @@ use crate::{
 
 const RECV_QUEUE_CAPACITY: usize = 1024;
 
+enum FrameDispatch {
+    DeliverIpv4(Vec<u8>),
+    Reply(Vec<u8>),
+    Ignore,
+}
+
 pub fn datalink_recv(iface: &str, local_mac: [u8; 6], local_ip: [u8; 4]) -> Result<()> {
     let mut cap = open_device(iface)?;
     if cap.get_datalink() != Linktype::ETHERNET {
         return Err(anyhow!("仅支持 Ethernet 网卡"));
     }
-    if let Err(err) = cap.filter("ether proto 0x0800", true) {
+    if let Err(err) = cap.filter("arp or ether proto 0x0800", true) {
         eprintln!("安装 BPF 过滤器失败，将继续捕获所有帧: {err}");
     }
 
     let queue = Arc::new(RecvQueue::new(RECV_QUEUE_CAPACITY));
     let worker_queue = Arc::clone(&queue);
-    let worker = thread::spawn(move || delivery_worker(worker_queue, local_mac, local_ip));
+    let worker = thread::spawn(move || delivery_worker(worker_queue, local_ip));
 
     println!("正在监听 {iface} ... Ctrl+C 结束");
-    let recv_result = recv_loop(&mut cap, local_mac, Arc::clone(&queue));
+    let recv_result = recv_loop(iface, &mut cap, local_mac, local_ip, Arc::clone(&queue));
 
     queue.close();
     worker.join().map_err(|_| anyhow!("交付线程异常退出"))??;
@@ -38,11 +45,17 @@ pub fn datalink_recv(iface: &str, local_mac: [u8; 6], local_ip: [u8; 4]) -> Resu
     recv_result
 }
 
-fn recv_loop(cap: &mut Capture<Active>, local_mac: [u8; 6], queue: Arc<RecvQueue>) -> Result<()> {
+fn recv_loop(
+    iface: &str,
+    cap: &mut Capture<Active>,
+    local_mac: [u8; 6],
+    local_ip: [u8; 4],
+    queue: Arc<RecvQueue>,
+) -> Result<()> {
     loop {
         match cap.next_packet() {
-            Ok(packet) => {
-                if let Some(frame) = handle_frame(packet.data, &local_mac)? {
+            Ok(packet) => match handle_frame(packet.data, &local_mac, &local_ip)? {
+                FrameDispatch::DeliverIpv4(frame) => {
                     if let Err(err) = queue.push(frame) {
                         match err {
                             QueueError::Full => eprintln!("接收队列已满，丢弃一帧"),
@@ -50,24 +63,34 @@ fn recv_loop(cap: &mut Capture<Active>, local_mac: [u8; 6], queue: Arc<RecvQueue
                         }
                     }
                 }
-            }
+                FrameDispatch::Reply(reply) => {
+                    cap.sendpacket(reply.as_slice())
+                        .with_context(|| format!("发送 ARP 应答失败 (iface={iface})"))?;
+                    println!(
+                        "ARP 应答已发送: 目标MAC={} 帧长={}",
+                        fmt_mac(&reply[..6]),
+                        reply.len()
+                    );
+                }
+                FrameDispatch::Ignore => {}
+            },
             Err(PcapError::TimeoutExpired) => continue,
             Err(err) => return Err(err.into()),
         }
     }
 }
 
-fn handle_frame(data: &[u8], local_mac: &[u8; 6]) -> Result<Option<Vec<u8>>> {
+fn handle_frame(data: &[u8], local_mac: &[u8; 6], local_ip: &[u8; 4]) -> Result<FrameDispatch> {
     if data.len() < HEADER_LEN + CRC_LEN {
-        return Ok(None);
+        return Ok(FrameDispatch::Ignore);
     }
     if data.len() < MIN_FRAME_SIZE || data.len() > MAX_FRAME_SIZE {
         //println!("丢弃帧: 长度异常 caplen={}", data.len());
-        return Ok(None);
+        return Ok(FrameDispatch::Ignore);
     }
     let dest = &data[..6];
     if dest != local_mac && dest != &BROADCAST_MAC {
-        return Ok(None);
+        return Ok(FrameDispatch::Ignore);
     }
     let src = &data[6..12];
     let ether_type = u16::from_be_bytes([data[12], data[13]]);
@@ -76,7 +99,7 @@ fn handle_frame(data: &[u8], local_mac: &[u8; 6]) -> Result<Option<Vec<u8>>> {
     let crc_calc = crc32(&data[..payload_end]);
     if crc_calc != crc_expect {
         //println!("丢弃帧: CRC 不匹配 计算={crc_calc:08X} 期望={crc_expect:08X}");
-        return Ok(None);
+        return Ok(FrameDispatch::Ignore);
     }
     println!(
         "收到帧: len={} 源MAC={} 目的MAC={} EtherType=0x{ether_type:04X}",
@@ -85,25 +108,34 @@ fn handle_frame(data: &[u8], local_mac: &[u8; 6]) -> Result<Option<Vec<u8>>> {
         fmt_mac(dest)
     );
     let frame = data[..payload_end].to_vec();
-    Ok(Some(frame))
+    match ether_type {
+        ETHER_TYPE_IPV4 => Ok(FrameDispatch::DeliverIpv4(frame)),
+        ETHER_TYPE_ARP => {
+            let payload = &frame[HEADER_LEN..];
+            match arp::handle_incoming(payload, *local_mac, *local_ip) {
+                Ok(Some(reply)) => Ok(FrameDispatch::Reply(reply)),
+                Ok(None) => Ok(FrameDispatch::Ignore),
+                Err(err) => {
+                    eprintln!("ARP 处理失败: {err}");
+                    Ok(FrameDispatch::Ignore)
+                }
+            }
+        }
+        _ => Ok(FrameDispatch::Ignore),
+    }
 }
 
-fn delivery_worker(queue: Arc<RecvQueue>, local_mac: [u8; 6], local_ip: [u8; 4]) -> Result<()> {
+fn delivery_worker(queue: Arc<RecvQueue>, local_ip: [u8; 4]) -> Result<()> {
     let mut reassembler = Ipv4Reassembler::new();
     while let Some(frame) = queue.pop() {
-        if let Err(err) = process_frame(&frame, local_mac, local_ip, &mut reassembler) {
+        if let Err(err) = process_frame(&frame, local_ip, &mut reassembler) {
             eprintln!("处理帧失败: {err}");
         }
     }
     Ok(())
 }
 
-fn process_frame(
-    frame: &[u8],
-    _local_mac: [u8; 6],
-    local_ip: [u8; 4],
-    reassembler: &mut Ipv4Reassembler,
-) -> Result<()> {
+fn process_frame(frame: &[u8], local_ip: [u8; 4], reassembler: &mut Ipv4Reassembler) -> Result<()> {
     if frame.len() < HEADER_LEN {
         return Ok(());
     }

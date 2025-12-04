@@ -7,7 +7,7 @@ use pcap::{Active, Capture};
 pub use recv::datalink_recv;
 pub use send::datalink_send;
 
-fn open_device(name: &str) -> Result<Capture<Active>> {
+pub(crate) fn open_device(name: &str) -> Result<Capture<Active>> {
     Capture::from_device(name)
         .context("定位网卡失败")?
         .promisc(true)

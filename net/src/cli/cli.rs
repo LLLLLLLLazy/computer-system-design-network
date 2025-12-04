@@ -9,9 +9,9 @@ use crate::enternet::net::parse_mac;
 
 pub enum Mode {
     Send {
-        dest_mac: [u8; 6],
         dest_ip: [u8; 4],
         protocol: u8,
+        manual_dest_mac: Option<[u8; 6]>,
     },
     Recv,
 }
@@ -39,27 +39,44 @@ pub fn parse_cli() -> Result<CliArgs> {
     };
     match raw_mode.to_lowercase().as_str() {
         "send" => {
-            if rest.len() > 3 {
+            if rest.len() > 4 {
                 return Err(anyhow!(
-                    "参数过多，最多提供网卡、目标 MAC、目标 IP 与协议号"
+                    "参数过多，最多提供网卡、目标 IP、协议号与可选的目标 MAC"
                 ));
             }
-            let dest_mac = match rest.get(0) {
-                Some(value) => parse_mac(value),
-                None => {
-                    let input = prompt("请输入目标 MAC (格式 XX:XX:XX:XX:XX:XX): ")?;
-                    parse_mac(&input)
+
+            let mut manual_dest_mac = None;
+            let mut parsed_dest_ip = None;
+            let mut parsed_protocol = None;
+
+            for token in &rest {
+                if looks_like_mac(token) && manual_dest_mac.is_none() {
+                    manual_dest_mac = Some(parse_mac(token)?);
+                    continue;
                 }
-            }?;
-            let dest_ip = match rest.get(1) {
-                Some(value) => parse_ipv4(value)?,
+                if looks_like_ipv4(token) && parsed_dest_ip.is_none() {
+                    parsed_dest_ip = Some(parse_ipv4(token)?);
+                    continue;
+                }
+                if parsed_protocol.is_none() {
+                    parsed_protocol = Some(parse_protocol(token)?);
+                    continue;
+                }
+                return Err(anyhow!(
+                    "无法解析参数 {token}，请按照 <iface> [dest-ip] [protocol] [dest-mac] 的顺序"
+                ));
+            }
+
+            let dest_ip = match parsed_dest_ip {
+                Some(ip) => ip,
                 None => {
                     let input = prompt("请输入目标 IP (格式 a.b.c.d): ")?;
                     parse_ipv4(&input)?
                 }
             };
-            let protocol = match rest.get(2) {
-                Some(value) => parse_protocol(value)?,
+
+            let protocol = match parsed_protocol {
+                Some(num) => num,
                 None => {
                     let input =
                         prompt("请输入上层协议号 (ICMP=1, IGMP=2, TCP=6, UDP=17，默认0): ")?;
@@ -70,11 +87,12 @@ pub fn parse_cli() -> Result<CliArgs> {
                     }
                 }
             };
+
             Ok(CliArgs {
                 mode: Mode::Send {
-                    dest_mac,
                     dest_ip,
                     protocol,
+                    manual_dest_mac,
                 },
                 iface,
             })

@@ -23,16 +23,32 @@ run-send: build
 	else \
 		iface="$(IFACE)"; \
 	fi; \
-	if [ -z "$(DEST)" ]; then \
-		read -p "请输入目标 MAC (格式 XX:XX:XX:XX:XX:XX): " dest_input; \
-		dest="$$dest_input"; \
+	if [ -z "$(DEST_IP)" ]; then \
+		read -p "请输入目标 IP (a.b.c.d): " dest_ip_input; \
+		dest_ip="$$dest_ip_input"; \
 	else \
-		dest="$(DEST)"; \
+		dest_ip="$(DEST_IP)"; \
 	fi; \
-	if [ -z "$$dest" ]; then \
-		echo "目标 MAC 不能为空"; exit 1; \
+	if [ -z "$$dest_ip" ]; then \
+		echo "目标 IP 不能为空"; exit 1; \
 	fi; \
-	$(SUDO) ./target/debug/net send $$iface $$dest
+	if [ -z "$(PROTOCOL)" ]; then \
+		read -p "请输入协议号 (默认0，可留空): " proto_input; \
+		if [ -z "$$proto_input" ]; then proto=0; else proto="$$proto_input"; fi; \
+	else \
+		proto="$(PROTOCOL)"; \
+	fi; \
+	if [ -z "$(DEST_MAC)" ]; then \
+		read -p "可选：手动指定目标 MAC (留空表示使用 ARP 自动解析): " dest_mac_input; \
+		dest_mac="$$dest_mac_input"; \
+	else \
+		dest_mac="$(DEST_MAC)"; \
+	fi; \
+	if [ -n "$$dest_mac" ]; then \
+		$(SUDO) ./target/debug/net send $$iface $$dest_ip $$proto $$dest_mac; \
+	else \
+		$(SUDO) ./target/debug/net send $$iface $$dest_ip $$proto; \
+	fi
 
 .PHONY: run-recv
 run-recv: build
@@ -51,6 +67,10 @@ fmt:
 .PHONY: clean
 clean:
 	$(CARGO) clean
+
+.PHONY: test-arp
+test-arp:
+	$(CARGO) test enternet::arp::tests::subnet_detection
 
 # 调试目标，显示检测到的系统和使用的命令
 .PHONY: debug

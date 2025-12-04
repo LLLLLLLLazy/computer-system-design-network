@@ -2,6 +2,7 @@
 //pub const SRC_MAC: [u8; 6] = [0x22; 6];
 pub const BROADCAST_MAC: [u8; 6] = [0xFF; 6];
 pub const ETHER_TYPE_IPV4: u16 = 0x0800;
+pub const ETHER_TYPE_ARP: u16 = 0x0806;
 //pub const MIN_PAYLOAD_LEN: usize = 46;
 //pub const MAX_PAYLOAD_LEN: usize = 1500;
 pub const MIN_FRAME_SIZE: usize = 64;
@@ -39,4 +40,23 @@ pub fn crc32(data: &[u8]) -> u32 {
         }
     }
     !crc
+}
+
+pub fn build_frame(
+    dest_mac: &[u8; 6],
+    src_mac: &[u8; 6],
+    ether_type: u16,
+    payload: &[u8],
+) -> Vec<u8> {
+    let mut frame = Vec::with_capacity(HEADER_LEN + payload.len() + CRC_LEN);
+    frame.extend_from_slice(dest_mac);
+    frame.extend_from_slice(src_mac);
+    frame.extend_from_slice(&ether_type.to_be_bytes());
+    frame.extend_from_slice(payload);
+    let crc = crc32(&frame);
+    frame.extend_from_slice(&crc.to_be_bytes());
+    if frame.len() < MIN_FRAME_SIZE {
+        frame.resize(MIN_FRAME_SIZE, 0);
+    }
+    frame
 }

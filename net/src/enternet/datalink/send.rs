@@ -3,8 +3,10 @@ use std::{fs, sync::Arc, thread};
 
 use super::open_device;
 use crate::{
+    config::network_profile,
     enternet::{
-        frame::{CRC_LEN, ETHER_TYPE_IPV4, INPUT_FILE, MIN_FRAME_SIZE, crc32},
+        arp::{self, ArpEntryState, arp_cache, same_subnet},
+        frame::{CRC_LEN, ETHER_TYPE_IPV4, INPUT_FILE, build_frame, fmt_ipv4, fmt_mac},
         send_queue::{SendQueue, SendQueueError},
     },
     ip::{Ipv4BuildParams, Ipv4Packet, build_ipv4_packets},
@@ -18,14 +20,48 @@ pub fn datalink_send(
     iface: &str,
     src_mac: [u8; 6],
     src_ip: [u8; 4],
-    dest_mac: [u8; 6],
     dest_ip: [u8; 4],
     protocol: u8,
+    manual_dest_mac: Option<[u8; 6]>,
 ) -> Result<()> {
     let payload = fs::read(INPUT_FILE).with_context(|| format!("无法打开输入文件 {INPUT_FILE}"))?;
     if payload.is_empty() {
         return Err(anyhow!("输入文件为空，无法发送"));
     }
+
+    let net_profile = network_profile();
+    println!(
+        "网络参数: 本地IP={} 子网掩码={} 网关={} DHCP={} DNS=[{}, {}]",
+        fmt_ipv4(&src_ip),
+        fmt_ipv4(&net_profile.subnet_mask),
+        fmt_ipv4(&net_profile.gateway_ip),
+        if net_profile.dhcp_enabled {
+            "启用"
+        } else {
+            "关闭"
+        },
+        fmt_ipv4(&net_profile.dns_servers[0]),
+        fmt_ipv4(&net_profile.dns_servers[1])
+    );
+
+    let target_ip = if same_subnet(&src_ip, &dest_ip, &net_profile.subnet_mask) {
+        dest_ip
+    } else {
+        println!(
+            "目的 IP {} 不在本地网段，使用下一跳 {}",
+            fmt_ipv4(&dest_ip),
+            fmt_ipv4(&net_profile.gateway_ip)
+        );
+        net_profile.gateway_ip
+    };
+
+    let dest_mac = if let Some(mac) = manual_dest_mac {
+        println!("使用手动指定的目的 MAC: {}", fmt_mac(&mac));
+        arp_cache().insert(target_ip, mac, ArpEntryState::Static);
+        mac
+    } else {
+        arp::resolve_mac(iface, src_mac, src_ip, target_ip)?
+    };
 
     let params = Ipv4BuildParams {
         src: src_ip,
@@ -69,7 +105,7 @@ fn enqueue_fragment(
     dest_mac: &[u8; 6],
 ) -> Result<usize> {
     let Ipv4Packet { header, bytes } = fragment;
-    let frame = build_frame_from_payload(&bytes, src_mac, dest_mac);
+    let frame = build_frame(dest_mac, src_mac, ETHER_TYPE_IPV4, &bytes);
     println!(
         "构造 IPv4 分片: 标识=0x{:04X}({}) 片偏移={}B ({}×8B) DF={} MF={} 总长={} 载荷={}B",
         header.identification,
@@ -89,20 +125,6 @@ fn enqueue_fragment(
         }
         Err(SendQueueError::Closed) => Ok(0),
     }
-}
-
-fn build_frame_from_payload(payload: &[u8], src_mac: &[u8; 6], dest_mac: &[u8; 6]) -> Vec<u8> {
-    let mut frame = Vec::with_capacity(14 + payload.len() + CRC_LEN);
-    frame.extend_from_slice(dest_mac);
-    frame.extend_from_slice(src_mac);
-    frame.extend_from_slice(&ETHER_TYPE_IPV4.to_be_bytes());
-    frame.extend_from_slice(payload);
-    let crc = crc32(&frame);
-    frame.extend_from_slice(&crc.to_be_bytes());
-    if frame.len() < MIN_FRAME_SIZE {
-        frame.resize(MIN_FRAME_SIZE, 0);
-    }
-    frame
 }
 
 fn send_worker(iface: String, queue: Arc<SendQueue>) -> Result<()> {

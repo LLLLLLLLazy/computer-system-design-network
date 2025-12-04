@@ -1,6 +1,7 @@
 use anyhow::Result;
 
 mod cli;
+mod config;
 mod enternet;
 mod ip;
 
@@ -14,10 +15,17 @@ fn main() -> Result<()> {
     let src_ip = iface_ipv4(&args.iface)?;
     match args.mode {
         Mode::Send {
-            dest_mac,
             dest_ip,
             protocol,
-        } => datalink_send(&args.iface, src_mac, src_ip, dest_mac, dest_ip, protocol),
+            manual_dest_mac,
+        } => datalink_send(
+            &args.iface,
+            src_mac,
+            src_ip,
+            dest_ip,
+            protocol,
+            manual_dest_mac,
+        ),
         Mode::Recv => datalink_recv(&args.iface, src_mac, src_ip),
     }
 }
