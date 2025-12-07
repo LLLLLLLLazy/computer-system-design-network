@@ -50,6 +50,59 @@ run-send: build
 		$(SUDO) ./target/debug/net send $$iface $$dest_ip $$proto; \
 	fi
 
+.PHONY: udp-send
+udp-send: build
+	@if [ -z "$(IFACE)" ]; then \
+		read -p "请输入网卡名称 (默认 $(DEFAULT_IFACE)): " iface_input; \
+		if [ -z "$$iface_input" ]; then iface="$(DEFAULT_IFACE)"; else iface="$$iface_input"; fi; \
+	else \
+		iface="$(IFACE)"; \
+	fi; \
+	if [ -z "$(DEST_IP)" ]; then \
+		read -p "请输入目标 IP (a.b.c.d): " dest_ip_input; dest_ip="$$dest_ip_input"; \
+	else \
+		dest_ip="$(DEST_IP)"; \
+	fi; \
+	if [ -z "$(DEST_PORT)" ]; then \
+		read -p "请输入目标端口: " dest_port_input; dest_port="$$dest_port_input"; \
+	else \
+		dest_port="$(DEST_PORT)"; \
+	fi; \
+	if [ -z "$(FILE)" ]; then \
+		read -p "请输入要发送的文件路径 (默认 ./data/input_file.txt): " file_input; \
+		if [ -z "$$file_input" ]; then file="./data/input_file.txt"; else file="$$file_input"; fi; \
+	else \
+		file="$(FILE)"; \
+	fi; \
+	src_port_opt=""; \
+	if [ -n "$(SRC_PORT)" ]; then src_port_opt="$(SRC_PORT)"; fi; \
+	if [ -n "$$src_port_opt" ]; then \
+		$(SUDO) ./target/debug/net udp-send $$iface $$dest_ip $$dest_port $$file $$src_port_opt; \
+	else \
+		$(SUDO) ./target/debug/net udp-send $$iface $$dest_ip $$dest_port $$file; \
+	fi
+
+.PHONY: udp-recv
+udp-recv: build
+	@if [ -z "$(IFACE)" ]; then \
+		read -p "请输入网卡名称 (默认 $(DEFAULT_IFACE)): " iface_input; \
+		if [ -z "$$iface_input" ]; then iface="$(DEFAULT_IFACE)"; else iface="$$iface_input"; fi; \
+	else \
+		iface="$(IFACE)"; \
+	fi; \
+	if [ -z "$(LISTEN_PORT)" ]; then \
+		read -p "请输入监听端口: " listen_port_input; listen_port="$$listen_port_input"; \
+	else \
+		listen_port="$(LISTEN_PORT)"; \
+	fi; \
+	if [ -z "$(OUTPUT)" ]; then \
+		read -p "请输入输出文件路径 (默认 ./data/output_file.txt): " output_input; \
+		if [ -z "$$output_input" ]; then output="./data/output_file.txt"; else output="$$output_input"; fi; \
+	else \
+		output="$(OUTPUT)"; \
+	fi; \
+	$(SUDO) ./target/debug/net udp-recv $$iface $$listen_port $$output
+
 .PHONY: run-recv
 run-recv: build
 	@if [ -z "$(IFACE)" ]; then \
@@ -71,6 +124,10 @@ clean:
 .PHONY: test-arp
 test-arp:
 	$(CARGO) test enternet::arp::tests::subnet_detection
+
+.PHONY: test
+test:
+	$(CARGO) test -- --nocapture
 
 # 调试目标，显示检测到的系统和使用的命令
 .PHONY: debug

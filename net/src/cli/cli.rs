@@ -14,6 +14,16 @@ pub enum Mode {
         manual_dest_mac: Option<[u8; 6]>,
     },
     Recv,
+    UdpSendFile {
+        dest_ip: [u8; 4],
+        dest_port: u16,
+        src_port: Option<u16>,
+        file: String,
+    },
+    UdpRecvFile {
+        listen_port: u16,
+        output: String,
+    },
 }
 
 pub struct CliArgs {
@@ -25,7 +35,7 @@ pub fn parse_cli() -> Result<CliArgs> {
     let mut args = env::args();
     let program = args.next().unwrap_or_else(|| "enternet".into());
     let raw_mode = args.next().ok_or_else(|| {
-        anyhow!("用法: {program} <send|recv> [iface] [dest-mac] [dest-ip] [protocol]")
+        anyhow!("用法: {program} <send|recv|udp-send|udp-recv> ...")
     })?;
     let mut rest: Vec<String> = args.collect();
     let iface = if let Some(candidate) = rest.first() {
@@ -101,8 +111,50 @@ pub fn parse_cli() -> Result<CliArgs> {
             mode: Mode::Recv,
             iface,
         }),
+        "udp-send" => {
+            if rest.len() < 3 || rest.len() > 4 {
+                return Err(anyhow!(
+                    "用法: {program} udp-send <iface> <dest-ip> <dest-port> <file> [src-port]"
+                ));
+            }
+
+            // 位置参数: iface dest-ip dest-port file [src-port]
+            let dest_ip = parse_ipv4(&rest[0])?;
+            let dest_port: u16 = rest[1]
+                .parse()
+                .context("目标端口需为 0-65535 整数")?;
+            let file = rest[2].clone();
+            let src_port = if rest.len() == 4 {
+                Some(rest[3].parse().context("源端口需为 0-65535 整数")?)
+            } else {
+                None
+            };
+
+            Ok(CliArgs {
+                mode: Mode::UdpSendFile {
+                    dest_ip,
+                    dest_port,
+                    src_port,
+                    file,
+                },
+                iface,
+            })
+        }
+        "udp-recv" => {
+            if rest.len() < 2 {
+                return Err(anyhow!("用法: {program} udp-recv <iface> <listen-port> <output-file>"));
+            }
+            let listen_port: u16 = rest[0]
+                .parse()
+                .context("监听端口需为 0-65535 整数")?;
+            let output = rest[1].clone();
+            Ok(CliArgs {
+                mode: Mode::UdpRecvFile { listen_port, output },
+                iface,
+            })
+        }
         _ => Err(anyhow!(
-            "用法: {program} <send|recv> [iface] [dest-mac] [dest-ip] [protocol]"
+            "用法: {program} <send|recv|udp-send|udp-recv> ..."
         )),
     }
 }

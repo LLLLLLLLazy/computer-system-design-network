@@ -148,6 +148,26 @@ fn choose_iface() -> Result<String> {
 		.ok_or_else(|| anyhow!("未发现可用网卡，请设置环境变量 NET_IFACE"))
 }
 
+fn create_socket_on_iface(iface: &str) -> Result<SocketId> {
+	let local_ip = iface_ipv4(iface)?;
+	let local_mac = iface_mac(iface)?;
+	let port = next_ephemeral_port();
+
+	let id = next_socket_id();
+	let sock = Arc::new(UdpSocket::new(id, iface.to_string(), local_ip, local_mac, port));
+	socket_table().write().unwrap().insert(id, Arc::clone(&sock));
+
+	println!(
+		"[UDP] 新建 socket id={} 本地IP={} 本地端口={} iface={}",
+		id,
+		crate::enternet::frame::fmt_ipv4(&local_ip),
+		port,
+		iface
+	);
+
+	Ok(id)
+}
+
 pub(crate) fn get_socket(id: SocketId) -> Result<Arc<UdpSocket>> {
 	let table = socket_table().read().unwrap();
 	table
@@ -178,22 +198,11 @@ pub fn socket(af: i32, sock_type: i32, protocol: i32) -> Result<SocketId> {
 	}
 
 	let iface = choose_iface()?;
-	let local_ip = iface_ipv4(&iface)?;
-	let local_mac = iface_mac(&iface)?;
-	let port = next_ephemeral_port();
+	create_socket_on_iface(&iface)
+}
 
-	let id = next_socket_id();
-	let sock = Arc::new(UdpSocket::new(id, iface, local_ip, local_mac, port));
-	socket_table().write().unwrap().insert(id, Arc::clone(&sock));
-
-	println!(
-		"[UDP] 新建 socket id={} 本地IP={} 本地端口={}",
-		id,
-		crate::enternet::frame::fmt_ipv4(&local_ip),
-		port
-	);
-
-	Ok(id)
+pub fn socket_on_iface(iface: &str) -> Result<SocketId> {
+	create_socket_on_iface(iface)
 }
 
 pub fn bind(id: SocketId, addr: SockAddrIn) -> Result<()> {
