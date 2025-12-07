@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use pcap::{Active, Capture, Error as PcapError};
-use std::{fs::OpenOptions, io::Write, sync::Arc, thread};
+use std::{convert::TryInto, fs::OpenOptions, io::Write, sync::Arc, thread};
 
 use crate::{
     enternet::{
@@ -11,7 +11,9 @@ use crate::{
         },
         recv_queue::{QueueError, RecvQueue},
     },
+    icmp::handle_icmpv4,
     ip::{Ipv4Reassembler, ReassembledPacket, parse_ipv4_packet},
+    udp::handle_udp_packet,
 };
 
 const RECV_QUEUE_CAPACITY: usize = 1024;
@@ -40,7 +42,15 @@ pub fn datalink_recv(iface: &str, local_mac: [u8; 6], local_ip: [u8; 4]) -> Resu
 
     let queue = Arc::new(RecvQueue::new(RECV_QUEUE_CAPACITY));
     let worker_queue = Arc::clone(&queue);
-    let worker = thread::spawn(move || delivery_worker(worker_queue, local_ip));
+    let iface_name = iface.to_string();
+        println!(
+            "监听信息: iface={} 本机IP={} 本机MAC={}",
+            iface,
+            fmt_ipv4(&local_ip),
+            fmt_mac(&local_mac)
+        );
+    let worker =
+        thread::spawn(move || delivery_worker(worker_queue, iface_name, local_mac, local_ip));
 
     println!("正在监听 {iface} ... Ctrl+C 结束");
     let recv_result = recv_loop(iface, &mut cap, local_mac, local_ip, Arc::clone(&queue));
@@ -60,28 +70,26 @@ fn recv_loop(
 ) -> Result<()> {
     loop {
         match cap.next_packet() {
-            Ok(packet) => {
-                match handle_frame(packet.data, &local_mac, &local_ip)? {
-                    FrameDispatch::DeliverIpv4(frame) => {
-                        if let Err(err) = queue.push(frame) {
-                            match err {
-                                QueueError::Full => eprintln!("接收队列已满，丢弃一帧"),
-                                QueueError::Closed => return Ok(()),
-                            }
+            Ok(packet) => match handle_frame(packet.data, &local_mac, &local_ip)? {
+                FrameDispatch::DeliverIpv4(frame) => {
+                    if let Err(err) = queue.push(frame) {
+                        match err {
+                            QueueError::Full => eprintln!("接收队列已满，丢弃一帧"),
+                            QueueError::Closed => return Ok(()),
                         }
                     }
-                    FrameDispatch::Reply(reply) => {
-                        cap.sendpacket(reply.as_slice())
-                            .with_context(|| format!("发送 ARP 应答失败 (iface={iface})"))?;
-                        println!(
-                            "ARP 应答已发送: 目标MAC={} 帧长={}",
-                            fmt_mac(&reply[..6]),
-                            reply.len()
-                        );
-                    }
-                    FrameDispatch::Ignore => {}
                 }
-            }
+                FrameDispatch::Reply(reply) => {
+                    cap.sendpacket(reply.as_slice())
+                        .with_context(|| format!("发送 ARP 应答失败 (iface={iface})"))?;
+                    println!(
+                        "ARP 应答已发送: 目标MAC={} 帧长={}",
+                        fmt_mac(&reply[..6]),
+                        reply.len()
+                    );
+                }
+                FrameDispatch::Ignore => {}
+            },
             Err(PcapError::TimeoutExpired) => continue,
             Err(err) => return Err(err.into()),
         }
@@ -133,17 +141,28 @@ fn handle_frame(data: &[u8], local_mac: &[u8; 6], local_ip: &[u8; 4]) -> Result<
     }
 }
 
-fn delivery_worker(queue: Arc<RecvQueue>, local_ip: [u8; 4]) -> Result<()> {
+fn delivery_worker(
+    queue: Arc<RecvQueue>,
+    iface: String,
+    local_mac: [u8; 6],
+    local_ip: [u8; 4],
+) -> Result<()> {
     let mut reassembler = Ipv4Reassembler::new();
     while let Some(frame) = queue.pop() {
-        if let Err(err) = process_frame(&frame, local_ip, &mut reassembler) {
+        if let Err(err) = process_frame(&frame, local_mac, local_ip, &iface, &mut reassembler) {
             eprintln!("处理帧失败: {err}");
         }
     }
     Ok(())
 }
 
-fn process_frame(frame: &[u8], local_ip: [u8; 4], reassembler: &mut Ipv4Reassembler) -> Result<()> {
+fn process_frame(
+    frame: &[u8],
+    local_mac: [u8; 6],
+    local_ip: [u8; 4],
+    iface: &str,
+    reassembler: &mut Ipv4Reassembler,
+) -> Result<()> {
     if frame.len() < HEADER_LEN {
         return Ok(());
     }
@@ -151,6 +170,7 @@ fn process_frame(frame: &[u8], local_ip: [u8; 4], reassembler: &mut Ipv4Reassemb
     if ether_type != ETHER_TYPE_IPV4 {
         return Ok(());
     }
+    let peer_mac: [u8; 6] = frame[6..12].try_into().expect("slice len checked");
     for expired in reassembler.remove_expired() {
         println!(
             "分片重组超时: 标识={} 源={} 目的={} 协议={}",
@@ -184,34 +204,61 @@ fn process_frame(frame: &[u8], local_ip: [u8; 4], reassembler: &mut Ipv4Reassemb
     } else {
         ""
     };
-    println!(
-        "IPv4 首部{fragment_label}: 版本={} IHL={}({}B) ToS=0x{:02X} 标识={} DF={} MF={} 片偏移={}B TTL={} 协议={} 源={} 目的={} 总长={} 选项={}B 载荷={}B",
-        header.version,
-        header.ihl,
-        header.header_len_bytes(),
-        header.tos,
-        header.identification,
-        header.df as u8,
-        header.mf as u8,
-        header.fragment_offset_bytes(),
-        header.ttl,
-        header.protocol,
-        fmt_ipv4(&header.src),
-        fmt_ipv4(&header.dst),
-        header.total_length,
-        parsed.options.len(),
-        parsed.payload.len()
-    );
+        println!(
+            "IPv4 首部{fragment_label}: 版本={} IHL={}({}B) ToS=0x{:02X} 标识={} DF={} MF={} 片偏移={}B TTL={} 协议={}({}) 源={} 目的={} 总长={} 选项={}B 载荷={}B",
+            header.version,
+            header.ihl,
+            header.header_len_bytes(),
+            header.tos,
+            header.identification,
+            header.df as u8,
+            header.mf as u8,
+            header.fragment_offset_bytes(),
+            header.ttl,
+            header.protocol,
+            protocol_name(header.protocol),
+            fmt_ipv4(&header.src),
+            fmt_ipv4(&header.dst),
+            header.total_length,
+            parsed.options.len(),
+            parsed.payload.len()
+        );
 
     if let Some(packet) = reassembler.push_fragment(header, parsed.payload) {
-        deliver_ip_payload(&packet)?;
+        deliver_ip_payload(&packet, local_mac, local_ip, peer_mac, iface)?;
     }
     Ok(())
 }
 
-fn deliver_ip_payload(packet: &ReassembledPacket) -> Result<()> {
+fn deliver_ip_payload(
+    packet: &ReassembledPacket,
+    local_mac: [u8; 6],
+    local_ip: [u8; 4],
+    peer_mac: [u8; 6],
+    iface: &str,
+) -> Result<()> {
     let protocol = packet.header.protocol;
     let name = protocol_name(protocol);
+    match protocol {
+        1 => {
+            if let Err(err) = handle_icmpv4(
+                iface,
+                local_mac,
+                local_ip,
+                peer_mac,
+                &packet.header,
+                &packet.payload,
+            ) {
+                eprintln!("ICMP 处理失败: {err}");
+            }
+        }
+        17 => {
+            if let Err(err) = handle_udp_packet(&packet.header, &packet.payload) {
+                eprintln!("UDP 处理失败: {err}");
+            }
+        }
+        _ => {}
+    }
     OpenOptions::new()
         .create(true)
         .write(true)
