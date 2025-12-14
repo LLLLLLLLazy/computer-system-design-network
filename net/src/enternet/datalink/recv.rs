@@ -256,6 +256,8 @@ fn deliver_ip_payload(
             if let Err(err) = handle_udp_packet(&packet.header, &packet.payload) {
                 eprintln!("UDP 处理失败: {err}");
             }
+            // UDP 走 socket 队列，不直接写输出文件，避免将 UDP 首部落盘
+            return Ok(());
         }
         _ => {}
     }

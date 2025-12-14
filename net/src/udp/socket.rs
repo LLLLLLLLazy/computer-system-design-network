@@ -96,8 +96,15 @@ impl UdpSocket {
 		let mut inner = self.inner.lock().unwrap();
 		loop {
 			if let Some(pkt) = inner.queue.pop_front() {
-				let n = buf.len().min(pkt.data.len());
-				buf[..n].copy_from_slice(&pkt.data[..n]);
+				if pkt.data.len() > buf.len() {
+					return Err(anyhow!(
+						"接收缓冲过小: 需要 {} 字节，实际 {} 字节",
+						pkt.data.len(),
+						buf.len()
+					));
+				}
+				let n = pkt.data.len();
+				buf[..n].copy_from_slice(&pkt.data);
 				return Ok((n, pkt.src));
 			}
 			if inner.closed {

@@ -18,6 +18,11 @@ pub fn handle_udp_packet(ip_header: &Ipv4Header, payload: &[u8]) -> Result<()> {
 	let udp_len = u16::from_be_bytes([payload[4], payload[5]]) as usize;
 
 	if udp_len < UDP_HEADER_LEN || udp_len > payload.len() {
+		eprintln!(
+			"[UDP] 丢弃报文: 长度异常 udp_len={} payload_len={}",
+			udp_len,
+			payload.len()
+		);
 		return Ok(());
 	}
 
@@ -35,9 +40,11 @@ pub fn handle_udp_packet(ip_header: &Ipv4Header, payload: &[u8]) -> Result<()> {
 
 	let Some(sock) = find_socket(&ip_header.dst, dst_port) else {
 		eprintln!(
-			"[UDP] 未找到匹配 socket，目的 IP={} 端口={}",
+			"[UDP] 未找到匹配 socket，dst {}:{}，src {}:{}。建议发送 ICMP Port Unreachable",
 			crate::enternet::frame::fmt_ipv4(&ip_header.dst),
-			dst_port
+			dst_port,
+			crate::enternet::frame::fmt_ipv4(&ip_header.src),
+			src_port
 		);
 		return Ok(());
 	};
