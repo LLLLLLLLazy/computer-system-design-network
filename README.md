@@ -1,35 +1,45 @@
 # computer-system-design-network
 
-面向《计算机系统设计》课程的网络实验项目集合。当前实现 Rust 版以太网帧收发工具 **enternet**，并已实现 IPv4（网络层）与 ARP（地址解析协议）功能，支持分片/重组、首部校验和与自动 MAC 解析。
+面向《计算机系统设计》课程的网络实验项目集合。当前实现 Rust 版以太网帧收发工具 **enternet**，并已实现 IPv4（网络层）、UDP（传输层）与 ARP（地址解析协议）功能，支持分片/重组、首部校验和、UDP 校验和与自动 MAC 解析。
 
 ## 目录结构
 ```
 network/
 └── net/
-    ├── Cargo.toml
-    ├── Makefile
-    ├── data/
-    │   ├── input_file.txt
-    │   ├── output_file.txt
-    │   └── tools/gen_and_verify.py
-    └── src/
-        ├── main.rs
-        ├── config.rs        # 常量与网络参数（子网掩码/网关/DNS/DHCP 等）
-        ├── cli/             # 命令行解析与交互
-        ├── enternet/        # 数据链路层（帧、队列、ARP、datalink）
-        │   ├── frame.rs     # 以太网帧常量与工具（MAC/ETHertype/CRC）
-        │   ├── arp.rs       # ARP 报文与缓存、解析与应答
-        │   ├── net.rs
-        │   └── datalink/
-        │       ├── send.rs  # 发送路径（ARP 解析后发 IPv4）
-        │       └── recv.rs  # 接收路径（监听 ARP/IPv4）
-        └── ip/              # 网络层 IPv4 模块（构造/解析/重组/校验和）
-            ├── common.rs
-            ├── builder.rs
-            ├── parser.rs
-            ├── reassembly.rs
-            ├── checksum.rs
-            └── tests.rs
+  ├── Cargo.toml
+  ├── Makefile
+  ├── data/
+  │   ├── input_file.txt
+  │   ├── output_file.txt
+  │   └── tools/
+  │       └── gen_and_verify.py
+  └── src/
+    ├── main.rs
+    ├── config.rs        # 常量与网络参数（子网掩码/网关/DNS/DHCP 等）
+    ├── cli/             # 命令行解析与交互
+    ├── enternet/        # 数据链路层（帧、队列、ARP、datalink）
+    │   ├── frame.rs     # 以太网帧常量与工具（MAC/ETHertype/CRC）
+    │   ├── arp.rs       # ARP 报文与缓存、解析与应答
+    │   ├── net.rs
+    │   └── datalink/
+    │       ├── send.rs  # 发送路径（ARP 解析后发 IPv4）
+    │       └── recv.rs  # 接收路径（监听 ARP/IPv4）
+    ├── ip/              # 网络层 IPv4 模块（构造/解析/重组/校验和）
+    │   ├── common.rs
+    │   ├── builder.rs
+    │   ├── parser.rs
+    │   ├── reassembly.rs
+    │   ├── checksum.rs
+    │   └── tests.rs
+    └── udp/             # 简单的传输层 UDP 实现
+      ├── mod.rs
+      ├── send.rs
+      ├── recv.rs
+      ├── socket.rs
+      ├── types.rs
+      └── test/
+        ├── api.rs
+        └── mod.rs
 ```
 
 ## 已完成功能
@@ -55,15 +65,11 @@ network/
   - 校验和（`checksum.rs`）：IPv4 首部校验和计算。
   - 单元测试（`tests.rs`）：覆盖分片/重组与校验和等核心逻辑。
 
-- ARP协议( `src/enternet/arp.rs`)
+- ARP（`src/enternet/arp.rs`）
   - ARP 报文字段定义与帧构造（请求/应答）。
-  - ARP 缓存（静态/动态/TTL=10min），3 次重试 + 10s 超时策略。
-  - 根据子网掩码判断同网段/跨网段，自动解析目标 IP 或网关 IP 的 MAC。
-- 发送路径集成（`datalink/send.rs`）：
-  - 在发送 IPv4 前先解析目的 MAC（命令行可选指定静态 MAC；否则触发 ARP）。
-- 接收路径集成（`datalink/recv.rs`）：
-  - 监听 ARP 与 IPv4，收到针对本机的 ARP 请求时即时回复。
-  - 将网络上的 ARP 应答学习写入应用缓存，避免发送端超时。
+  - ARP 缓存（静态/动态，TTL=10 分钟），支持缓存查找、学习与插入；解析过程中采用 3 次重试和 10s 超时策略。
+  - 根据子网掩码判断同网段/跨网段，发送路径在发送 IPv4 前触发 ARP 解析（支持命令行指定静态 MAC 以跳过 ARP）。
+  - 接收路径集成：监听 ARP 并对针对本机的请求即时应答；收到的应答会写入缓存以供后续发送使用。
 - 配置（`config.rs`）：支持环境变量覆盖网络参数（`NET_SUBNET_MASK`、`NET_GATEWAY_IP`、`NET_DNS1`、`NET_DNS2`、`NET_DHCP`）。
 - CLI：`send <iface> <dest-ip> [protocol] [dest-mac]`，`dest-mac` 为空时自动 ARP 解析。
 
@@ -155,7 +161,11 @@ network/
    ```
 
 ## 注意事项与限制
-- 教学实现：未实现 ICMP 回显、未解析 TCP载荷（已经实现基本的UDP协议），仅保留协议号与原始数据。
-- 需在非生产网络中测试，避免影响实际业务。
-- 发送/抓包需 libpcap 权限（通常 sudo/root）。
-- 回环接口（lo0）无以太网帧与 MAC 层，不适用于 ARP/以太网层测试。
+- 教学实现：
+  - 未实现 ICMP 回显（ICMP 功能未完全覆盖）。
+  - 未实现完整的 TCP 协议（完整 TCP 实现不在本仓库范围内）。
+  - 已实现的协议：IPv4、UDP（基础发送/接收、socket 抽象与校验和）和 ARP（基础解析与应答）。
+- 测试与运行：
+  - 请在非生产网络中测试，避免影响实际业务。
+  - 发送/抓包需 libpcap 权限（通常需要 `sudo` 或 root 权限）。
+  - 回环接口（`lo0`）无以太网帧与 MAC 层，不适用于 ARP/以太网层测试。
