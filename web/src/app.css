@@ -1,0 +1,17 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #e5e7eb;
+  background: #0b1220;
+}
+
+body {
+  @apply bg-slate-900 text-slate-100 font-sans;
+}
+
+.card {
+  @apply rounded-2xl bg-slate-800/70 border border-slate-700 p-4 shadow-lg;
+}

@@ -129,6 +129,33 @@ test-arp:
 test:
 	$(CARGO) test -- --nocapture
 
+# 前端开发预览（SvelteKit dev）
+# 用法：make frontend-dev [PORT=5173]
+.PHONY: frontend-dev
+frontend-dev:
+	@cd ../web && PORT=$${PORT:-5173} npm run dev -- --host --port $${PORT:-5173}
+
+# 前端构建（生产静态资源）
+.PHONY: frontend-build
+frontend-build:
+	@cd ../web && npm run build
+
+# 前端本地预览已构建产物
+.PHONY: frontend-preview
+frontend-preview:
+	@cd ../web && npm run preview
+
+# 一键启动状态服务 + 前端开发服（需要两个并发任务）
+# 默认端口：状态服务 5174，前端 5173
+.PHONY: dev-all
+dev-all:
+	@STATUS_PORT=$${STATUS_PORT:-5174}; \
+	PORT=$${PORT:-5173}; \
+	echo "启动 status_server ($$STATUS_PORT) 与前端 dev ($$PORT)"; \
+	(STATUS_PORT=$$STATUS_PORT cd ../net && cargo run --bin status_server) & \
+	(PORT=$$PORT STATUS_PORT=$$STATUS_PORT cd ../web && npm run dev -- --host --port $$PORT); \
+	wait
+
 # 调试目标，显示检测到的系统和使用的命令
 .PHONY: debug
 debug:

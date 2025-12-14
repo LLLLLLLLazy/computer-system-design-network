@@ -7,16 +7,26 @@ mod enternet;
 mod icmp;
 mod ip;
 mod udp;
+mod telemetry;
 
 use cli::cli::{Mode, parse_cli};
 use enternet::datalink::{datalink_recv, datalink_send};
 use enternet::net::{iface_ipv4, iface_mac};
 use udp::{bind, closesocket, recvfrom, sendto, socket_on_iface, SockAddrIn};
+use telemetry::{init as telemetry_init, spawn_status_server};
+use std::env;
 
 fn main() -> Result<()> {
     let args = parse_cli()?;
     let src_mac = iface_mac(&args.iface)?;
     let src_ip = iface_ipv4(&args.iface)?;
+
+    let tel = telemetry_init();
+    tel.set_iface(&args.iface, &crate::enternet::frame::fmt_ipv4(&src_ip), &crate::enternet::frame::fmt_mac(&src_mac));
+
+    // Start in-process status server so the frontend can read live telemetry from this run.
+    let status_port = env::var("STATUS_PORT").unwrap_or_else(|_| "5174".to_string());
+    let _status_server = spawn_status_server(&format!("0.0.0.0:{status_port}"));
     println!(
         "启动参数: iface={} 本机IP={} 本机MAC={}",
         &args.iface,
@@ -63,6 +73,8 @@ fn run_udp_send_file(
         return Err(anyhow!("文件为空"));
     }
 
+    let tel = telemetry_init();
+
     let sock = socket_on_iface(iface)?;
     if let Some(port) = src_port {
         bind(
@@ -75,6 +87,7 @@ fn run_udp_send_file(
     }
 
     let total_chunks = ((data.len() + UDP_CHUNK - 1) / UDP_CHUNK) as u32;
+    tel.start_transfer("send", path, total_chunks as u64);
     println!(
         "[UDP SEND] iface={} dst={}:{} file={} size={}B chunks={}",
         iface,
@@ -103,9 +116,14 @@ fn run_udp_send_file(
             },
         )?;
         println!("[UDP SEND] chunk {}/{} bytes={} sent={}", idx + 1, total_chunks, chunk.len(), sent);
+        tel.inc_udp_send(1);
+        tel.inc_tx(1);
+        tel.update_transfer_done((idx_u32 + 1) as u64);
         // 轻微节流，避免过快导致丢包
         thread::sleep(Duration::from_millis(2));
     }
+
+    tel.finish_transfer();
 
     closesocket(sock).ok();
     Ok(())
@@ -114,6 +132,7 @@ fn run_udp_send_file(
 fn run_udp_recv_file(iface: &str, listen_port: u16, output: &str) -> Result<()> {
     let local_ip = iface_ipv4(iface)?;
     let local_mac = iface_mac(iface)?;
+    let tel = telemetry_init();
 
     // 启动链路层接收线程，用于将 UDP 报文交付到 socket 队列。
     let iface_name = iface.to_string();
@@ -153,6 +172,7 @@ fn run_udp_recv_file(iface: &str, listen_port: u16, output: &str) -> Result<()> 
         if total_chunks.is_none() {
             total_chunks = Some(recv_total as usize);
             received.resize(recv_total as usize, None);
+            tel.start_transfer("recv", output, recv_total as u64);
             println!(
                 "[UDP RECV] 开始接收: 源 {}:{} chunks={} 文件={}",
                 enternet::frame::fmt_ipv4(&src.ip),
@@ -171,6 +191,10 @@ fn run_udp_recv_file(iface: &str, listen_port: u16, output: &str) -> Result<()> 
                 received[idx as usize] = Some(payload.to_vec());
             }
 
+            tel.inc_udp_recv(1);
+            tel.inc_rx(1);
+            tel.update_transfer_done((idx as u64) + 1);
+
             let have = received.iter().filter(|c| c.is_some()).count();
             println!("[UDP RECV] 收到分片 {}/{} (idx={}) len={}", have, total, idx, chunk_len);
 
@@ -181,6 +205,7 @@ fn run_udp_recv_file(iface: &str, listen_port: u16, output: &str) -> Result<()> 
                 }
                 fs::write(output, &file_data).with_context(|| format!("写入 {output} 失败"))?;
                 println!("[UDP RECV] 文件接收完成: 写入 {} ({}B)", output, file_data.len());
+                tel.finish_transfer();
                 closesocket(sock).ok();
                 break;
             }
